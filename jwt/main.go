@@ -7,24 +7,28 @@ import (
 	"github.com/dgrijalva/jwt-go"
 )
 
+type Claims struct {
+	Username string `json:"username"`
+	Role     string `json:"role"`
+	jwt.StandardClaims
+}
+
 func main() {
-	// Создаем токен
-	token := jwt.New(jwt.SigningMethodHS256)
+	claims := Claims{
+		Username: "user123",
+		Role:     "user",
+		StandardClaims: jwt.StandardClaims{
+			ExpiresAt: time.Now().Add(1 * time.Minute).Unix(),
+			IssuedAt:  time.Now().Unix(),
+		},
+	}
 
-	// Устанавливаем утверждения (claims)
-	claims := token.Claims.(jwt.MapClaims)
-	claims["username"] = "user123"
-	claims["exp"] = time.Now().Add(time.Second * 1).Unix() // Время истечения через 24 часа
-
-	// Генерируем секретный ключ
-	secretKey := []byte("my-secret-key")
-
-	// Подписываем токен с использованием секретного ключа
-	tokenString, err := token.SignedString(secretKey)
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenString, err := token.SignedString([]byte("my-secret-key"))
 	if err != nil {
-		fmt.Println(err)
+		fmt.Printf("Не удалось подписать токен: %v\n", err)
 		return
 	}
 
-	fmt.Println("JWT:", tokenString)
+	fmt.Printf("JWT: %s\n", tokenString)
 }

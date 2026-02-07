@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -9,49 +10,125 @@ import (
 	"github.com/dgrijalva/jwt-go"
 )
 
+type Claims struct {
+	Username string `json:"username"`
+	Role     string `json:"role"`
+	jwt.StandardClaims
+}
+
+type userInfo struct {
+	Password string
+	Role     string
+}
+
+type loginRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+type loginResponse struct {
+	Token string `json:"token"`
+}
+
+var users = map[string]userInfo{
+	"admin": {Password: "secret", Role: "admin"},
+	"user":  {Password: "user123", Role: "user"},
+}
+
+const secretKey = "my-secret-key"
+
 func main() {
-	http.HandleFunc("/protected", func(w http.ResponseWriter, r *http.Request) {
-		// Получаем токен из заголовка Authorization
-		tokenString := r.Header.Get("Authorization")
-		if tokenString == "" {
-			http.Error(w, "No token provided", http.StatusUnauthorized)
+	http.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
 			return
 		}
 
-		// Удаляем "Bearer " из начала токена
-		tokenString = strings.Replace(tokenString, "Bearer ", "", 1)
+		var req loginRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Некорректный JSON", http.StatusBadRequest)
+			return
+		}
+
+		info, exists := users[req.Username]
+		if !exists || info.Password != req.Password {
+			http.Error(w, "Неверные учётные данные", http.StatusUnauthorized)
+			return
+		}
+
+		claims := Claims{
+			Username: req.Username,
+			Role:     info.Role,
+			StandardClaims: jwt.StandardClaims{
+				ExpiresAt: time.Now().Add(5 * time.Minute).Unix(),
+				IssuedAt:  time.Now().Unix(),
+			},
+		}
+
+		token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+		tokenString, err := token.SignedString([]byte(secretKey))
+		if err != nil {
+			http.Error(w, "Не удалось подписать токен", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(loginResponse{Token: tokenString}); err != nil {
+			http.Error(w, "Не удалось сформировать ответ", http.StatusInternalServerError)
+		}
+	})
+
+	http.HandleFunc("/protected", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Получаем токен из заголовка Authorization
+		tokenString := r.Header.Get("Authorization")
+		if tokenString == "" {
+			http.Error(w, "Токен не передан", http.StatusUnauthorized)
+			return
+		}
+
+		const bearerPrefix = "Bearer "
+		if !strings.HasPrefix(tokenString, bearerPrefix) {
+			http.Error(w, "Некорректный заголовок Authorization", http.StatusUnauthorized)
+			return
+		}
+		tokenString = strings.TrimPrefix(tokenString, bearerPrefix)
 
 		// Парсим токен
-		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-			// Проверяем метод подписи и возвращаем секретный ключ
+		claims := &Claims{}
+		token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, fmt.Errorf("Unexpected signing method: %v", token.Header["alg"])
+				return nil, fmt.Errorf("неподдерживаемый алгоритм подписи: %v", token.Header["alg"])
 			}
-			return []byte("my-secret-key"), nil
+			return []byte(secretKey), nil
 		})
 
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusUnauthorized)
+			http.Error(w, "Токен не прошёл проверку", http.StatusUnauthorized)
 			return
 		}
 
 		// Проверяем валидность токена
-		if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-			// Проверяем срок действия токена
-			expTime := time.Unix(int64(claims["exp"].(float64)), 0)
-			if expTime.Before(time.Now()) {
-				http.Error(w, "Token has expired", http.StatusUnauthorized)
-				return
-			}
-
-			// Токен валидный, продолжаем обработку
-			username := claims["username"].(string)
-			fmt.Fprintf(w, "Welcome, %s!", username)
-		} else {
-			http.Error(w, "Invalid token", http.StatusUnauthorized)
+		if !token.Valid {
+			http.Error(w, "Токен недействителен", http.StatusUnauthorized)
 			return
+		}
+
+		switch claims.Role {
+		case "admin":
+			fmt.Fprintln(w, "Панель администратора")
+		case "user":
+			fmt.Fprintln(w, "Зона пользователя")
+		default:
+			http.Error(w, "Неизвестная роль", http.StatusForbidden)
 		}
 	})
 
-	http.ListenAndServe(":8080", nil)
+	if err := http.ListenAndServe(":8080", nil); err != nil {
+		fmt.Printf("Не удалось запустить сервер: %v\n", err)
+	}
 }
