@@ -14,27 +14,37 @@ var cookieHandler = securecookie.New(
 
 func main() {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// Устанавливаем куку
-		value := map[string]interface{}{"key": "value"}
-		encoded, err := cookieHandler.Encode("cookie-name", value)
-		if err == nil {
-			cookie := &http.Cookie{
-				Name:  "cookie-name",
-				Value: encoded,
-				Path:  "/",
-			}
-			http.SetCookie(w, cookie)
-		}
+		const cookieName = "visit-count"
+		count := 0
 
 		// Чтение куки
-		cookie, err := r.Cookie("cookie-name")
-		if err == nil {
-			value := make(map[string]interface{})
-			if err := cookieHandler.Decode("cookie-name", cookie.Value, &value); err == nil {
-				fmt.Fprintf(w, "Cookie Value: %s", value["key"])
+		if cookie, err := r.Cookie(cookieName); err == nil {
+			value := make(map[string]int)
+			if err := cookieHandler.Decode(cookieName, cookie.Value, &value); err == nil {
+				count = value["count"]
 			}
 		}
+
+		count++
+
+		// Устанавливаем куку с обновлённым счётчиком
+		value := map[string]int{"count": count}
+		encoded, err := cookieHandler.Encode(cookieName, value)
+		if err != nil {
+			http.Error(w, "Не удалось закодировать куку", http.StatusInternalServerError)
+			return
+		}
+
+		http.SetCookie(w, &http.Cookie{
+			Name:  cookieName,
+			Value: encoded,
+			Path:  "/",
+		})
+
+		fmt.Fprintf(w, "Вы посетили страницу %d раз", count)
 	})
 
-	http.ListenAndServe(":8080", nil)
+	if err := http.ListenAndServe(":8080", nil); err != nil {
+		fmt.Printf("Не удалось запустить сервер: %v\n", err)
+	}
 }
