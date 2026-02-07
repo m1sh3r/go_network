@@ -1,2 +1,2 @@
 # Получить всех
-curl http://localhost:8080/users
+curl -u admin:secret http://localhost:8080/users

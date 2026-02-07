@@ -1,2 +1,2 @@
 # Получить пользователя по ID
-curl http://localhost:8080/users/1
+curl -u admin:secret http://localhost:8080/users/1

@@ -24,24 +24,42 @@ var (
 	mu     sync.RWMutex
 )
 
+var authUsers = map[string]string{
+	"admin":  "secret",
+	"reader": "read123",
+}
+
+func withBasicAuth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, pass, ok := r.BasicAuth()
+		expected, exists := authUsers[user]
+		if !ok || !exists || expected != pass {
+			w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
+			http.Error(w, "Не авторизован", http.StatusUnauthorized)
+			return
+		}
+		next(w, r)
+	}
+}
+
 func getUsers(w http.ResponseWriter, r *http.Request) {
 	mu.RLock()
 	defer mu.RUnlock()
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(users); err != nil {
-		http.Error(w, "Failed to encode users", http.StatusInternalServerError)
+		http.Error(w, "Не удалось закодировать список пользователей", http.StatusInternalServerError)
 	}
 }
 
 func parseUserID(path string) (int, error) {
 	idStr := strings.TrimPrefix(path, "/users/")
 	if idStr == "" {
-		return 0, errors.New("empty id")
+		return 0, errors.New("идентификатор не указан")
 	}
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		return 0, fmt.Errorf("invalid id: %w", err)
+		return 0, errors.New("некорректный идентификатор")
 	}
 	return id, nil
 }
@@ -49,7 +67,7 @@ func parseUserID(path string) (int, error) {
 func getUser(w http.ResponseWriter, r *http.Request) {
 	id, err := parseUserID(r.URL.Path)
 	if err != nil {
-		http.Error(w, "Invalid ID", http.StatusBadRequest)
+		http.Error(w, "Некорректный идентификатор", http.StatusBadRequest)
 		return
 	}
 
@@ -58,24 +76,24 @@ func getUser(w http.ResponseWriter, r *http.Request) {
 	mu.RUnlock()
 
 	if !exists {
-		http.Error(w, "User not found", http.StatusNotFound)
+		http.Error(w, "Пользователь не найден", http.StatusNotFound)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(user); err != nil {
-		http.Error(w, "Failed to encode user", http.StatusInternalServerError)
+		http.Error(w, "Не удалось закодировать пользователя", http.StatusInternalServerError)
 	}
 }
 
 func createUser(w http.ResponseWriter, r *http.Request) {
 	var newUser User
 	if err := json.NewDecoder(r.Body).Decode(&newUser); err != nil {
-		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		http.Error(w, "Некорректный JSON", http.StatusBadRequest)
 		return
 	}
 	if strings.TrimSpace(newUser.Name) == "" {
-		http.Error(w, "Name is required", http.StatusBadRequest)
+		http.Error(w, "Поле name обязательно", http.StatusBadRequest)
 		return
 	}
 
@@ -88,24 +106,24 @@ func createUser(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	if err := json.NewEncoder(w).Encode(newUser); err != nil {
-		http.Error(w, "Failed to encode user", http.StatusInternalServerError)
+		http.Error(w, "Не удалось закодировать пользователя", http.StatusInternalServerError)
 	}
 }
 
 func updateUser(w http.ResponseWriter, r *http.Request) {
 	id, err := parseUserID(r.URL.Path)
 	if err != nil {
-		http.Error(w, "Invalid ID", http.StatusBadRequest)
+		http.Error(w, "Некорректный идентификатор", http.StatusBadRequest)
 		return
 	}
 
 	var update User
 	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
-		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		http.Error(w, "Некорректный JSON", http.StatusBadRequest)
 		return
 	}
 	if strings.TrimSpace(update.Name) == "" {
-		http.Error(w, "Name is required", http.StatusBadRequest)
+		http.Error(w, "Поле name обязательно", http.StatusBadRequest)
 		return
 	}
 
@@ -113,7 +131,7 @@ func updateUser(w http.ResponseWriter, r *http.Request) {
 	user, exists := users[id]
 	if !exists {
 		mu.Unlock()
-		http.Error(w, "User not found", http.StatusNotFound)
+		http.Error(w, "Пользователь не найден", http.StatusNotFound)
 		return
 	}
 	user.Name = update.Name
@@ -122,21 +140,21 @@ func updateUser(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(user); err != nil {
-		http.Error(w, "Failed to encode user", http.StatusInternalServerError)
+		http.Error(w, "Не удалось закодировать пользователя", http.StatusInternalServerError)
 	}
 }
 
 func deleteUser(w http.ResponseWriter, r *http.Request) {
 	id, err := parseUserID(r.URL.Path)
 	if err != nil {
-		http.Error(w, "Invalid ID", http.StatusBadRequest)
+		http.Error(w, "Некорректный идентификатор", http.StatusBadRequest)
 		return
 	}
 
 	mu.Lock()
 	if _, exists := users[id]; !exists {
 		mu.Unlock()
-		http.Error(w, "User not found", http.StatusNotFound)
+		http.Error(w, "Пользователь не найден", http.StatusNotFound)
 		return
 	}
 	delete(users, id)
@@ -146,18 +164,18 @@ func deleteUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	http.HandleFunc("/users", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/users", withBasicAuth(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case "GET":
 			getUsers(w, r)
 		case "POST":
 			createUser(w, r)
 		default:
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			http.Error(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
 		}
-	})
+	}))
 
-	http.HandleFunc("/users/", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/users/", withBasicAuth(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case "GET":
 			getUser(w, r)
@@ -166,12 +184,12 @@ func main() {
 		case "DELETE":
 			deleteUser(w, r)
 		default:
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			http.Error(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
 		}
-	})
+	}))
 
-	fmt.Println("REST API running on http://localhost:8080")
+	fmt.Println("REST API запущен: http://localhost:8080")
 	if err := http.ListenAndServe(":8080", nil); err != nil {
-		fmt.Println("Server error:", err)
+		fmt.Printf("Не удалось запустить HTTP сервер: %v\n", err)
 	}
 }
