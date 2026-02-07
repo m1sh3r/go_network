@@ -36,7 +36,9 @@ func getUsers(w http.ResponseWriter, r *http.Request) {
 	defer mu.RUnlock()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(users)
+	if err := json.NewEncoder(w).Encode(users); err != nil {
+		http.Error(w, "Не удалось сформировать ответ", http.StatusInternalServerError)
+	}
 }
 
 // @Summary Get user by ID
@@ -44,14 +46,14 @@ func getUsers(w http.ResponseWriter, r *http.Request) {
 // @Produce json
 // @Param id path int true "User ID"
 // @Success 200 {object} User
-// @Failure 400 {string} string "Invalid ID"
-// @Failure 404 {string} string "User not found"
+// @Failure 400 {string} string "Некорректный идентификатор"
+// @Failure 404 {string} string "Пользователь не найден"
 // @Router /users/{id} [get]
 func getUser(w http.ResponseWriter, r *http.Request) {
 	idStr := r.URL.Path[len("/users/"):]
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		http.Error(w, "Invalid ID", http.StatusBadRequest)
+		http.Error(w, "Некорректный идентификатор", http.StatusBadRequest)
 		return
 	}
 
@@ -60,12 +62,14 @@ func getUser(w http.ResponseWriter, r *http.Request) {
 	mu.RUnlock()
 
 	if !exists {
-		http.Error(w, "User not found", http.StatusNotFound)
+		http.Error(w, "Пользователь не найден", http.StatusNotFound)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(user)
+	if err := json.NewEncoder(w).Encode(user); err != nil {
+		http.Error(w, "Не удалось сформировать ответ", http.StatusInternalServerError)
+	}
 }
 
 // @Summary Create a new user
@@ -73,12 +77,12 @@ func getUser(w http.ResponseWriter, r *http.Request) {
 // @Accept json
 // @Produce json
 // @Success 201 {object} User
-// @Failure 400 {string} string "Invalid JSON"
+// @Failure 400 {string} string "Некорректный JSON"
 // @Router /users [post]
 func createUser(w http.ResponseWriter, r *http.Request) {
 	var newUser User
 	if err := json.NewDecoder(r.Body).Decode(&newUser); err != nil {
-		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		http.Error(w, "Некорректный JSON", http.StatusBadRequest)
 		return
 	}
 
@@ -89,7 +93,36 @@ func createUser(w http.ResponseWriter, r *http.Request) {
 	mu.Unlock()
 
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(newUser)
+	if err := json.NewEncoder(w).Encode(newUser); err != nil {
+		http.Error(w, "Не удалось сформировать ответ", http.StatusInternalServerError)
+	}
+}
+
+// @Summary Delete user by ID
+// @Tags Users
+// @Param id path int true "User ID"
+// @Success 204 {string} string "Deleted"
+// @Failure 400 {string} string "Некорректный идентификатор"
+// @Failure 404 {string} string "Пользователь не найден"
+// @Router /users/{id} [delete]
+func deleteUser(w http.ResponseWriter, r *http.Request) {
+	idStr := r.URL.Path[len("/users/"):]
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		http.Error(w, "Некорректный идентификатор", http.StatusBadRequest)
+		return
+	}
+
+	mu.Lock()
+	if _, exists := users[id]; !exists {
+		mu.Unlock()
+		http.Error(w, "Пользователь не найден", http.StatusNotFound)
+		return
+	}
+	delete(users, id)
+	mu.Unlock()
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // @title Users API
@@ -106,21 +139,25 @@ func main() {
 		case "POST":
 			createUser(w, r)
 		default:
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			http.Error(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
 		}
 	})
 
 	http.HandleFunc("/users/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" {
 			getUser(w, r)
+		} else if r.Method == "DELETE" {
+			deleteUser(w, r)
 		} else {
-			http.Error(w, "Only GET supported for /users/{id}", http.StatusMethodNotAllowed)
+			http.Error(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
 		}
 	})
 
 	http.Handle("/swagger/", httpSwagger.WrapHandler)
 
-	fmt.Println("REST API running on http://localhost:8080")
-	fmt.Println("Swagger UI: http://localhost:8080/swagger/index.html")
-	http.ListenAndServe(":8080", nil)
+	fmt.Println("REST API запущен: http://localhost:8080")
+	fmt.Println("Swagger UI доступен: http://localhost:8080/swagger/index.html")
+	if err := http.ListenAndServe(":8080", nil); err != nil {
+		fmt.Printf("Не удалось запустить сервер: %v\n", err)
+	}
 }
