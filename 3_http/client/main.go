@@ -9,16 +9,17 @@ import (
 func main() {
 	resp, err := http.Get("https://httpbin.org/json")
 	if err != nil {
-		panic(err)
+		fmt.Printf("Не удалось выполнить запрос: %v\n", err)
+		return
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		panic(err)
+		fmt.Printf("Не удалось прочитать ответ: %v\n", err)
+		return
 	}
 
-	fmt.Println("Статус:", resp.Status)
-	fmt.Println("Тело ответа:")
-	fmt.Println(string(body))
+	fmt.Printf("Статус: %s\n", resp.Status)
+	fmt.Printf("Тело ответа:\n%s\n", string(body))
 }
