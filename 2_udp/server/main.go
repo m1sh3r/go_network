@@ -32,7 +32,7 @@ func main() {
 		fmt.Printf("Сообщение от %s: %s", clientAddr, msg)
 
 		// Отправляем ответ
-		if _, err := conn.WriteToUDP([]byte("Привет, привет!"), clientAddr); err != nil {
+		if _, err := conn.WriteToUDP([]byte("Привет!"), clientAddr); err != nil {
 			fmt.Printf("Не удалось отправить ответ: %v\n", err)
 		}
 	}
