@@ -2,12 +2,35 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"strings"
 	"time"
 )
+
+func exchangeMessage(conn *net.UDPConn, line string) (string, error) {
+	if strings.TrimSpace(line) == "" {
+		return "", errors.New("пустое сообщение")
+	}
+
+	if _, err := conn.Write([]byte(line)); err != nil {
+		return "", fmt.Errorf("не удалось отправить сообщение: %w", err)
+	}
+
+	if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		return "", fmt.Errorf("не удалось установить таймаут: %w", err)
+	}
+
+	buf := make([]byte, 1024)
+	n, err := conn.Read(buf)
+	if err != nil {
+		return "", fmt.Errorf("не удалось прочитать ответ: %w", err)
+	}
+
+	return string(buf[:n]), nil
+}
 
 func main() {
 	serverAddr, err := net.ResolveUDPAddr("udp", "localhost:8081")
@@ -41,27 +64,17 @@ func main() {
 			return
 		}
 
-		if _, err := conn.Write([]byte(line)); err != nil {
-			fmt.Printf("Не удалось отправить сообщение: %v\n", err)
-			return
-		}
-
-		if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
-			fmt.Printf("Не удалось установить таймаут: %v\n", err)
-			return
-		}
-
-		buf := make([]byte, 1024)
-		n, err := conn.Read(buf)
+		response, err := exchangeMessage(conn, line)
 		if err != nil {
-			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			var netErr net.Error
+			if errors.As(err, &netErr) && netErr.Timeout() {
 				fmt.Println("Превышено время ожидания ответа")
 				continue
 			}
-			fmt.Printf("Не удалось прочитать ответ: %v\n", err)
+			fmt.Printf("%v\n", err)
 			return
 		}
 
-		fmt.Printf("%s\n", string(buf[:n]))
+		fmt.Printf("%s\n", response)
 	}
 }
