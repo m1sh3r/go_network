@@ -17,13 +17,14 @@ function Start-GoServer {
         [string]$dir,
         [string]$file = "main.go"
     )
-    Start-Job -WorkingDirectory $dir -ScriptBlock {
-        param($file)
+    Start-Job -ScriptBlock {
+        param($dir, $file)
+        Set-Location $dir
         chcp 65001 | Out-Null
         [Console]::OutputEncoding = [Text.UTF8Encoding]::new()
         $OutputEncoding = [Text.UTF8Encoding]::new()
         & go run $file
-    } -ArgumentList $file
+    } -ArgumentList $dir, $file
 }
 
 function Stop-GoServer {
@@ -51,6 +52,39 @@ function Invoke-Client {
     & $script 2>&1 | ForEach-Object { "Клиент: $_" } | Out-Host
 }
 
+function Invoke-GoTest {
+    param(
+        [string]$dir,
+        [string[]]$TestArgs = @(),
+        [switch]$LegacyMode
+    )
+
+    Run-InDir $dir {
+        $prev = $env:GO111MODULE
+        $prevCache = $env:GOCACHE
+        try {
+            if ($LegacyMode) {
+                $env:GO111MODULE = "off"
+            }
+            $cacheDir = Join-Path $env:TEMP "go_network_gocache"
+            New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null
+            $env:GOCACHE = $cacheDir
+
+            if ($TestArgs.Count -gt 0) {
+                & go test @TestArgs
+            } else {
+                & go test
+            }
+            if ($LASTEXITCODE -ne 0) {
+                throw "go test failed in $dir"
+            }
+        } finally {
+            $env:GO111MODULE = $prev
+            $env:GOCACHE = $prevCache
+        }
+    }
+}
+
 function Read-TcpText {
     param([string]$hostName, [int]$port)
     $client = [System.Net.Sockets.TcpClient]::new()
@@ -66,6 +100,17 @@ function Read-TcpText {
         $client.Close()
     }
 }
+
+Write-Section "Тесты: go test по заданиям"
+Invoke-GoTest "$root\\1_tcp\\server" -LegacyMode
+Invoke-GoTest "$root\\2_udp\\client" -LegacyMode
+Invoke-GoTest "$root\\3_http\\server" -LegacyMode
+Invoke-GoTest "$root\\4_rest\\server" -LegacyMode
+Invoke-GoTest "$root\\basic_auth" -LegacyMode
+Invoke-GoTest "$root\\cookies"
+Invoke-GoTest "$root\\jwt" -TestArgs @("main_check.go", "main_check_test.go")
+Invoke-GoTest "$root\\session"
+Invoke-GoTest "$root\\swaggo_example"
 
 Write-Section "Задание 1: TCP эхо-сервер и статистика"
 $job = Start-GoServer "$root\\1_tcp\\server"
